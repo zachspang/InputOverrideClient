@@ -1,5 +1,7 @@
+import os
 import pygame
 import serial
+os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 
 pygame.init()
 
@@ -112,6 +114,8 @@ def main():
             if event.type == pygame.JOYDEVICEREMOVED:
                 joysticks.pop(event.instance_id, None)
                 print(f"Joystick {event.instance_id} disconnected")
+                if ser.is_open:
+                    ser.write((4095).to_bytes(2, byteorder="little"))
 
             # Cycle controllers
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -195,7 +199,12 @@ def main():
             text_print.tprint(screen, f"Button state: {hex_value}")
 
             if ser.is_open:
-                ser.write(button_state_value.to_bytes(2, byteorder="little"))
+                try:
+                    ser.write(button_state_value.to_bytes(2, byteorder="little"))
+                except serial.SerialTimeoutException:
+                    print("Write timed out")
+                    ser = serial.Serial()
+
 
         else:
             text_print.tprint(screen, "No controller connected")
