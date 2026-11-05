@@ -45,6 +45,21 @@ def main():
 
     # Serial port that connects to the DSpico
     ser = serial.Serial()
+    last_connect_attempt = -1000
+
+    def send(value):
+        nonlocal ser
+        if not ser.is_open:
+            return
+        try:
+            ser.write(value.to_bytes(2, byteorder="little"))
+        except (serial.SerialException, OSError) as e:
+            print(f"DSpico disconnected: {e}")
+            try:
+                ser.close()
+            except (serial.SerialException, OSError):
+                pass
+            ser = serial.Serial()
 
     def cycle_controller():
         nonlocal selected_id
@@ -86,11 +101,13 @@ def main():
 
     done = False
     while not done:
-        if not ser.is_open:
+        # Searching for the port enumerates every COM port, so only try once a second
+        if not ser.is_open and pygame.time.get_ticks() - last_connect_attempt >= 1000:
+            last_connect_attempt = pygame.time.get_ticks()
             try:
-                ser = serial.serial_for_url("hwgrep://CAFE:6000", timeout=1)
-            except serial.SerialException:
-                pass
+                ser = serial.serial_for_url("hwgrep://CAFE:6000", timeout=1, write_timeout=0.25)
+            except (serial.SerialException, OSError):
+                ser = serial.Serial()
 
         # Event processing step.
         # Possible joystick events: JOYAXISMOTION, JOYBALLMOTION, JOYBUTTONDOWN,
@@ -114,8 +131,7 @@ def main():
             if event.type == pygame.JOYDEVICEREMOVED:
                 joysticks.pop(event.instance_id, None)
                 print(f"Joystick {event.instance_id} disconnected")
-                if ser.is_open:
-                    ser.write((4095).to_bytes(2, byteorder="little"))
+                send(4095)
 
             # Cycle controllers
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -198,12 +214,7 @@ def main():
             hex_value = hex(button_state_value)
             text_print.tprint(screen, f"Button state: {hex_value}")
 
-            if ser.is_open:
-                try:
-                    ser.write(button_state_value.to_bytes(2, byteorder="little"))
-                except serial.SerialTimeoutException:
-                    print("Write timed out")
-                    ser = serial.Serial()
+            send(button_state_value)
 
 
         else:
@@ -214,6 +225,11 @@ def main():
 
         # Limit to 60 frames per second.
         clock.tick(60)
+
+    # Release all buttons
+    send(4095)
+    if ser.is_open:
+        ser.close()
 
 
 if __name__ == "__main__":
