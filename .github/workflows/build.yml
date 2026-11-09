@@ -1,0 +1,35 @@
+# Builds InputOverrideClient for every OS. Start it from the Actions tab:
+# Actions -> Build -> Run workflow. Each OS's download appears under
+# "Artifacts" on the run's summary page.
+name: Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-22.04    # older glibc, so the binary runs on more distros
+          - macos-latest    # Apple Silicon (arm64)
+          - macos-15-intel  # Intel (x64); remove if GitHub retires this runner
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # Builds and writes one archive to dist/
+      - name: Build
+        run: python build.py
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/*
+          archive: false  # upload the .zip/.tar.gz as-is, not wrapped in another zip
+          if-no-files-found: error

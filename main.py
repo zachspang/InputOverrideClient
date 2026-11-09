@@ -1,9 +1,14 @@
+import errno
 import os
+import sys
 import pygame
+from pygame._sdl2 import controller
 import serial
+
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 
 pygame.init()
+controller.init()
 
 class TextPrint:
     def __init__(self):
@@ -34,7 +39,7 @@ def main():
     # Used to manage how fast the screen updates.
     clock = pygame.time.Clock()
     text_print = TextPrint()
-    joysticks = {}
+    controllers = {}
 
     # Instance id of the controller currently being read.
     selected_id = None
@@ -46,6 +51,8 @@ def main():
     # Serial port that connects to the DSpico
     ser = serial.Serial()
     last_connect_attempt = -1000
+    # Set on Linux when the port exists but the user isn't allowed to open it
+    permission_denied = False
 
     def send(value):
         nonlocal ser
@@ -63,14 +70,14 @@ def main():
 
     def cycle_controller():
         nonlocal selected_id
-        ids = sorted(joysticks.keys())
+        ids = sorted(controllers.keys())
         if len(ids) < 2:
             return
         if selected_id in ids:
             selected_id = ids[(ids.index(selected_id) + 1) % len(ids)]
         else:
             selected_id = ids[0]
-        print(f"Switched to joystick {selected_id}")
+        print(f"Switched to controller {selected_id}")
 
     button_names = {
         0 : "A",
@@ -87,16 +94,20 @@ def main():
         11: "Y"
     }
 
-    # pygame xbox360 -> PAD_ALL_MASK https://twlsdk.randommeaninglesscharacters.com/docs/nitro/NitroSDK/pad/PAD_Read.html
+    # pygame controller -> PAD_ALL_MASK https://twlsdk.randommeaninglesscharacters.com/docs/nitro/NitroSDK/pad/PAD_Read.html
     button_mapping = {
-        0 : 1,
-        1 : 0,
-        2 : 11,
-        3 : 10,
-        4 : 9,
-        5 : 8,
-        6 : 2,
-        7 : 3,
+        pygame.CONTROLLER_BUTTON_A            : 1,
+        pygame.CONTROLLER_BUTTON_B            : 0,
+        pygame.CONTROLLER_BUTTON_X            : 11,
+        pygame.CONTROLLER_BUTTON_Y            : 10,
+        pygame.CONTROLLER_BUTTON_LEFTSHOULDER : 9,
+        pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: 8,
+        pygame.CONTROLLER_BUTTON_BACK         : 2,
+        pygame.CONTROLLER_BUTTON_START        : 3,
+        pygame.CONTROLLER_BUTTON_DPAD_RIGHT   : 4,
+        pygame.CONTROLLER_BUTTON_DPAD_LEFT    : 5,
+        pygame.CONTROLLER_BUTTON_DPAD_UP      : 6,
+        pygame.CONTROLLER_BUTTON_DPAD_DOWN    : 7,
     }
 
     done = False
@@ -106,12 +117,14 @@ def main():
             last_connect_attempt = pygame.time.get_ticks()
             try:
                 ser = serial.serial_for_url("hwgrep://CAFE:6000", timeout=1, write_timeout=0.25)
-            except (serial.SerialException, OSError):
+                permission_denied = False
+            except (serial.SerialException, OSError) as e:
+                permission_denied = sys.platform.startswith("linux") and e.errno == errno.EACCES
                 ser = serial.Serial()
 
         # Event processing step.
-        # Possible joystick events: JOYAXISMOTION, JOYBALLMOTION, JOYBUTTONDOWN,
-        # JOYBUTTONUP, JOYHATMOTION, JOYDEVICEADDED, JOYDEVICEREMOVED
+        # Possible controller events: CONTROLLERAXISMOTION, CONTROLLERBUTTONDOWN,
+        # CONTROLLERBUTTONUP, CONTROLLERDEVICEADDED, CONTROLLERDEVICEREMOVED
         try:
             events = pygame.event.get()
         except (SystemError, KeyError):
@@ -122,15 +135,16 @@ def main():
                 done = True
 
             # Handle hotplugging
-            if event.type == pygame.JOYDEVICEADDED:
-                joy = pygame.joystick.Joystick(event.device_index)
-                if joy.get_instance_id() not in joysticks:
-                    joysticks[joy.get_instance_id()] = joy
-                    print(f"Joystick {joy.get_instance_id()} connected")
+            if event.type == pygame.CONTROLLERDEVICEADDED:
+                ctrl = controller.Controller(event.device_index)
+                instance_id = ctrl.as_joystick().get_instance_id()
+                if instance_id not in controllers:
+                    controllers[instance_id] = ctrl
+                    print(f"Controller {instance_id} connected")
 
-            if event.type == pygame.JOYDEVICEREMOVED:
-                joysticks.pop(event.instance_id, None)
-                print(f"Joystick {event.instance_id} disconnected")
+            if event.type == pygame.CONTROLLERDEVICEREMOVED:
+                controllers.pop(event.instance_id, None)
+                print(f"Controller {event.instance_id} disconnected")
                 send(4095)
 
             # Cycle controllers
@@ -138,18 +152,17 @@ def main():
                 if cycle_button_rect.collidepoint(event.pos):
                     cycle_controller()
 
-
         screen.fill((255, 255, 255))
         text_print.reset()
 
         # Make sure the selection is valid
-        if joysticks and selected_id not in joysticks:
-            selected_id = sorted(joysticks.keys())[0]
-        elif not joysticks:
+        if controllers and selected_id not in controllers:
+            selected_id = sorted(controllers.keys())[0]
+        elif not controllers:
             selected_id = None
 
         # Draw the cycle button (greyed out unless 2+ controllers are connected)
-        enabled = len(joysticks) > 1
+        enabled = len(controllers) > 1
         mouse_over = cycle_button_rect.collidepoint(pygame.mouse.get_pos())
         if not enabled:
             fill = (220, 220, 220)
@@ -163,6 +176,10 @@ def main():
         screen.blit(label, label.get_rect(center=cycle_button_rect.center))
 
         text_print.tprint(screen, f"DSpico connected: {ser.is_open}")
+        if permission_denied:
+            text_print.tprint(screen, "Permission denied opening the DSpico. Run:")
+            text_print.tprint(screen, "  sudo usermod -aG dialout $USER")
+            text_print.tprint(screen, "then log out and back in.")
         text_print.tprint(screen, "Controller state:")
         text_print.indent()
 
@@ -170,40 +187,16 @@ def main():
         button_state = [1] * 12
 
         if selected_id is not None:
-            joystick = joysticks[selected_id]
+            ctrl = controllers[selected_id]
 
-            ids = sorted(joysticks.keys())
+            ids = sorted(controllers.keys())
             text_print.tprint(screen, f"Controller {ids.index(selected_id) + 1} of {len(ids)}")
 
-            name = joystick.get_name()
-            text_print.tprint(screen, f"Joystick name: {name}")
+            text_print.tprint(screen, f"Controller name: {ctrl.name}")
             text_print.indent()
 
-            buttons = joystick.get_numbuttons()
-
-            for i in range(buttons):
-                button = joystick.get_button(i)
-                if (i <= 7):
-                    button_state[button_mapping[i]] = button ^ 1
-
-            hats = joystick.get_numhats()
-            if hats > 0:
-                hat = joystick.get_hat(0)
-                up,down,left,right = 0,0,0,0
-
-                if hat[0] == -1:
-                    left = 1
-                elif hat[0] == 1:
-                    right = 1
-
-                if hat[1] == -1:
-                    down = 1
-                elif hat[1] == 1:
-                    up = 1
-                button_state[4] = right ^ 1
-                button_state[5] = left ^ 1
-                button_state[6] = up ^ 1
-                button_state[7] = down ^ 1
+            for sdl_button, ds_bit in button_mapping.items():
+                button_state[ds_bit] = int(ctrl.get_button(sdl_button)) ^ 1
 
             for i in range(len(button_state)):
                 text_print.tprint(screen, f"{button_names[i]} value: {button_state[i] ^ 1}")
@@ -215,7 +208,6 @@ def main():
             text_print.tprint(screen, f"Button state: {hex_value}")
 
             send(button_state_value)
-
 
         else:
             text_print.tprint(screen, "No controller connected")
