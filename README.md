@@ -9,10 +9,13 @@ Works on Windows, macOS, and Linux.
 
 ## Requirements
 
-Your DSpico must be running these forks of the firmware and Pico Loader, built from their `feature/usb-input-hook` branches.
+Your DSpico must be running these forks of the firmware and pico-loader, built from their `feature/usb-input-hook` branches.
 
 - [dspico-firmware (feature/usb-input-hook)](https://github.com/zachspang/dspico-firmware/tree/feature/usb-input-hook)
 - [pico-loader (feature/usb-input-hook)](https://github.com/zachspang/pico-loader/tree/feature/usb-input-hook)
+
+[This guide](https://github.com/LNH-team/dspico/blob/develop/GUIDE.md) explains how to setup your dspico. In step 5 clone [this](https://github.com/zachspang/dspico-firmware) instead.
+Skip step 7 and download this release of [pico-loader](https://github.com/zachspang/pico-loader/releases/latest). Place the 5 files from the pico-loader zip into a folder named _pico at the root of your SD.
 
 ## Running it
 
