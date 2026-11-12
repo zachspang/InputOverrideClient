@@ -6,6 +6,7 @@ from pygame._sdl2 import controller
 import serial
 
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
+os.environ["SDL_JOYSTICK_RAWINPUT"] = "0"
 
 pygame.init()
 controller.init()
